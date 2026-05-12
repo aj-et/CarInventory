@@ -1,0 +1,43 @@
+# ===== Build Artifacts =====
+bin/
+obj/
+
+# ===== Visual Studio =====
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# ===== JetBrains Rider =====
+.idea/
+*.sln.iml
+
+# ===== Secrets & Environment =====
+# appsettings.json is committed as a template (uses PLACEHOLDER for credentials)
+# Environment-specific overrides are ignored
+appsettings.*.json
+.env
+*.env
+
+# ===== Certificates & Keys =====
+*.pfx
+*.p12
+*.key
+*.pem
+
+# ===== Publish Output =====
+publish/
+**/Properties/PublishProfiles/
+
+# ===== NuGet =====
+*.nupkg
+*.snupkg
+packages/
+!**/packages/repositories.config
+
+# ===== OS Files =====
+.DS_Store
+Thumbs.db
+Desktop.ini
