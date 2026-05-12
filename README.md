@@ -1,6 +1,6 @@
 # Car Inventory API
 
-A **Car Inventory Management System** built with ASP.NET Core following Clean Architecture principles. Manages vehicles, customers, and sales orders with automatic vehicle status tracking.
+A **Car Inventory Management System** built with ASP.NET Core following Clean Architecture principles. Manages vehicles, customers, and sales orders with automatic vehicle status tracking, JWT authentication, and role-based access control.
 
 > **This is the backend half of a planned full-stack application.** An Angular frontend is in progress and will live alongside this folder in the same repository.
 
@@ -25,6 +25,7 @@ CarInventoryApp/
 | ORM | Entity Framework Core 8 |
 | Database Driver | Npgsql 8.x (PostgreSQL) |
 | Database | PostgreSQL via Supabase |
+| Authentication | JWT Bearer + BCrypt.Net-Next |
 | API Docs | OpenAPI + Scalar UI |
 | Frontend (planned) | Angular |
 
@@ -35,7 +36,7 @@ CarInventoryApp/
 3-project Clean Architecture solution:
 
 ```
-CarInventory.API/           ← Controllers, Program.cs, API configuration
+CarInventory.API/           ← Controllers, Services, Program.cs, API configuration
 CarInventory.Domain/        ← Models, DTOs (no dependencies on other layers)
 CarInventory.Infrastructure/← EF Core DbContext, Migrations
 ```
@@ -47,6 +48,16 @@ CarInventory.Infrastructure/← EF Core DbContext, Migrations
 ---
 
 ## Models & Relationships
+
+### User
+| Field | Type | Notes |
+|---|---|---|
+| Id | int | PK |
+| FirstName / LastName | string | |
+| Email | string | Unique index |
+| PasswordHash | string | BCrypt hash, never plaintext |
+| Role | UserRole | `Admin`, `SalesRep` (default: SalesRep) |
+| CreatedAt | DateTime | Set server-side |
 
 ### Vehicle
 | Field | Type | Notes |
@@ -89,6 +100,8 @@ CarInventory.Infrastructure/← EF Core DbContext, Migrations
 
 ## Business Logic
 
+### Vehicle Status Transitions
+
 Vehicle status is automatically managed when orders change:
 
 | Event | Vehicle Status |
@@ -100,36 +113,61 @@ Vehicle status is automatically managed when orders change:
 
 Orders can only be created against `Available` vehicles.
 
+### Authentication & Authorization
+
+| Route category | Requirement |
+|---|---|
+| `POST /api/auth/register` | Public |
+| `POST /api/auth/login` | Public |
+| All other routes | Valid JWT Bearer token |
+| `DELETE` on any resource | Admin role only |
+
 ---
 
 ## API Endpoints
 
+### Auth — `/api/auth`
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| POST | `/api/auth/register` | Public | Register user, returns JWT token |
+| POST | `/api/auth/login` | Public | Login, returns JWT token |
+
+**Auth response:**
+```json
+{
+  "token": "eyJ...",
+  "email": "user@example.com",
+  "role": "SalesRep",
+  "expires": "2026-05-19T00:00:00Z"
+}
+```
+
 ### Vehicles — `/api/vehicles`
-| Method | Route | Description |
-|---|---|---|
-| GET | `/api/vehicles` | List all vehicles |
-| GET | `/api/vehicles/{id}` | Get vehicle by ID |
-| POST | `/api/vehicles` | Create vehicle (status defaults to `Available`) |
-| PUT | `/api/vehicles/{id}` | Update vehicle |
-| DELETE | `/api/vehicles/{id}` | Delete vehicle |
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| GET | `/api/vehicles` | Bearer | List all vehicles |
+| GET | `/api/vehicles/{id}` | Bearer | Get vehicle by ID |
+| POST | `/api/vehicles` | Bearer | Create vehicle (status defaults to `Available`) |
+| PUT | `/api/vehicles/{id}` | Bearer | Update vehicle |
+| DELETE | `/api/vehicles/{id}` | Admin | Delete vehicle |
 
 ### Customers — `/api/customers`
-| Method | Route | Description |
-|---|---|---|
-| GET | `/api/customers` | List all customers |
-| GET | `/api/customers/{id}` | Get customer with their orders |
-| POST | `/api/customers` | Create customer |
-| PUT | `/api/customers/{id}` | Update customer |
-| DELETE | `/api/customers/{id}` | Delete customer |
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| GET | `/api/customers` | Bearer | List all customers |
+| GET | `/api/customers/{id}` | Bearer | Get customer with their orders |
+| POST | `/api/customers` | Bearer | Create customer |
+| PUT | `/api/customers/{id}` | Bearer | Update customer |
+| DELETE | `/api/customers/{id}` | Admin | Delete customer |
 
 ### Orders — `/api/orders`
-| Method | Route | Description |
-|---|---|---|
-| GET | `/api/orders` | List all orders (includes Vehicle + Customer) |
-| GET | `/api/orders/{id}` | Get order with relationships |
-| POST | `/api/orders` | Create order (reserves vehicle) |
-| PUT | `/api/orders/{id}/status` | Update order status (syncs vehicle status) |
-| DELETE | `/api/orders/{id}` | Delete order (releases vehicle) |
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| GET | `/api/orders` | Bearer | List all orders (includes Vehicle + Customer) |
+| GET | `/api/orders/{id}` | Bearer | Get order with relationships |
+| POST | `/api/orders` | Bearer | Create order (reserves vehicle) |
+| PUT | `/api/orders/{id}/status` | Bearer | Update order status (syncs vehicle status) |
+| DELETE | `/api/orders/{id}` | Admin | Delete order (releases vehicle) |
 
 Interactive API docs available at `/scalar/v1` when running in Development.
 
@@ -149,16 +187,21 @@ Interactive API docs available at `/scalar/v1` when running in Development.
    cd CarInventoryAPI
    ```
 
-2. **Add your connection string**  
+2. **Add your connection string and JWT config**  
    Create `CarInventory.API/appsettings.Development.json` (gitignored):
    ```json
    {
      "ConnectionStrings": {
        "DefaultConnection": "Host=...;Port=5432;Database=postgres;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true"
+     },
+     "Jwt": {
+       "Key": "your-secret-key-minimum-32-characters-long",
+       "Issuer": "CarInventoryAPI",
+       "Audience": "CarInventoryClient"
      }
    }
    ```
-   The `appsettings.json` in the repo contains a `PLACEHOLDER` password — it's a safe template only.
+   The `appsettings.json` in the repo contains `PLACEHOLDER` values — it's a safe template only.
 
 3. **Apply migrations**
    ```bash
@@ -170,16 +213,38 @@ Interactive API docs available at `/scalar/v1` when running in Development.
    ```bash
    dotnet run
    ```
-   API is available at `http://localhost:5219` (HTTP) or `https://localhost:7173` (HTTPS).  
+   API: `http://localhost:5219` / `https://localhost:7173`  
    Scalar docs: `https://localhost:7173/scalar/v1`
+
+5. **Register your first user**
+   ```http
+   POST /api/auth/register
+   Content-Type: application/json
+
+   {
+     "firstName": "Aaron",
+     "lastName": "Smith",
+     "email": "you@example.com",
+     "password": "yourpassword"
+   }
+   ```
+   Use the returned `token` as `Authorization: Bearer <token>` on all subsequent requests.
 
 ---
 
 ## Notable Implementation Details
 
+**BCrypt password hashing** — Passwords are hashed with BCrypt.Net-Next before storage. Plaintext passwords are never persisted.
+
+**JWT signed with HS512** — Tokens carry claims for `userId`, `email`, `role`, and `name`. Expiry is 7 days. The signing key, issuer, and audience are all configuration-driven.
+
+**Middleware order matters** — `UseAuthentication()` is registered before `UseAuthorization()` in the pipeline. Reversing these breaks auth silently.
+
+**TokenService is Scoped** — Registered as `AddScoped<TokenService>()` so it resolves configuration correctly within the request lifecycle.
+
 **Npgsql downgrade to 8.x** — Npgsql 10.x had a breaking bug with this setup; pinned to `8.0.10` across EF Core and the Npgsql provider for stability.
 
-**JSON circular reference** — `Customer.Orders` navigation property is decorated with `[JsonIgnore]`, and `JsonSerializerOptions.ReferenceHandler = IgnoreCycles` is set globally in `Program.cs` to prevent serialization loops.
+**JSON circular reference** — `Customer.Orders` navigation property is decorated with `[JsonIgnore]`, and `ReferenceHandler.IgnoreCycles` is set globally in `Program.cs` to prevent serialization loops.
 
 **CORS** — Configured to allow requests from `http://localhost:4200` for the Angular frontend.
 

@@ -20,6 +20,7 @@ obj/
 appsettings.*.json
 .env
 *.env
+test.http
 
 # ===== Certificates & Keys =====
 *.pfx
