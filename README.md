@@ -95,7 +95,7 @@ car-inventory-client/src/app/
 - Auto-reconnect enabled
 - Events handled: `StatsUpdated` (dashboard stat cards), `VehicleAdded`, `VehicleUpdated`, `OrderCreated` (live event banner in navbar)
 
-CORS on the backend is pinned to `http://localhost:4200` with `AllowCredentials()` required for SignalR.
+CORS on the backend explicitly lists allowed origins (`http://localhost:4200` for local dev, plus the live Vercel URLs) with `AllowCredentials()` required for SignalR. `AllowAnyOrigin()` is incompatible with `AllowCredentials()`, so each origin must be pinned explicitly.
 
 ---
 
@@ -376,7 +376,7 @@ cd car-inventory-client
 ng build --configuration production
 ```
 
-The output in `dist/car-inventory-client/browser/` can be served as a static site (Netlify, Vercel, Railway static, etc.).
+The output in `dist/car-inventory-client/browser/` can be served as a static site. The current deployment is on Vercel — add the Vercel URL to the `AllowAngular` CORS policy in `Program.cs` so the backend accepts requests from it.
 
 ---
 

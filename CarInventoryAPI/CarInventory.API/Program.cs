@@ -69,7 +69,11 @@ builder.Services.AddSignalR();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngular", policy =>
-        policy.WithOrigins("http://localhost:4200")
+        policy.WithOrigins(
+            "http://localhost:4200",
+            "https://car-inventory-five.vercel.app",
+            "https://car-inventory-ajets-projects.vercel.app"
+        )
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials()); // required for SignalR
