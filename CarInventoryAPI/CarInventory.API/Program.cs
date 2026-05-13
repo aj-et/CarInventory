@@ -77,7 +77,7 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || builder.Configuration["EnableSwagger"] == "true")
 {
     app.MapOpenApi();
     app.MapScalarApiReference();
