@@ -1,17 +1,15 @@
-# Car Inventory API
+# Car Inventory Management System
 
-A **Car Inventory Management System** built with ASP.NET Core following Clean Architecture principles. Manages vehicles, customers, and sales orders with automatic vehicle status tracking, JWT authentication, role-based access control, and real-time updates via SignalR.
-
-> **This is the backend half of a planned full-stack application.** An Angular frontend is in progress and will live alongside this folder in the same repository.
+A **full-stack Car Inventory Management System** — ASP.NET Core backend + Angular frontend — built following Clean Architecture principles. Manages vehicles, customers, and sales orders with automatic vehicle status tracking, JWT authentication, role-based access control, and real-time updates via SignalR.
 
 ---
 
-## Planned Monorepo Structure
+## Monorepo Structure
 
 ```
-CarInventoryApp/
-├── CarInventoryAPI/        ← ASP.NET Core backend (this repo, current root)
-└── CarInventoryAngular/    ← Angular frontend (in progress)
+CarInventory/
+├── CarInventoryAPI/          ← ASP.NET Core backend (.NET 10)
+└── car-inventory-client/     ← Angular frontend (Angular 19, in progress)
 ```
 
 ---
@@ -28,7 +26,8 @@ CarInventoryApp/
 | Authentication | JWT Bearer + BCrypt.Net-Next |
 | Real-Time | ASP.NET Core SignalR |
 | API Docs | OpenAPI + Scalar UI |
-| Frontend (planned) | Angular |
+| Frontend | Angular 19 (standalone components) |
+| Real-time client | @microsoft/signalr 10.x |
 
 ---
 
@@ -45,6 +44,20 @@ CarInventory.Infrastructure/← EF Core DbContext, Migrations
 **CarInventory.Domain** has no external dependencies — pure C# models and DTOs.  
 **CarInventory.Infrastructure** depends only on Domain.  
 **CarInventory.API** depends on both and wires everything together via DI.
+
+---
+
+## Frontend (car-inventory-client/)
+
+| Item | Detail |
+|---|---|
+| Framework | Angular 19.2 (standalone component architecture) |
+| Real-time | `@microsoft/signalr` 10.x — connects to the SignalR hub |
+| Styling | SCSS |
+| Dev server | `ng serve` → `http://localhost:4200` |
+| Status | Scaffold stage — components and services in progress |
+
+CORS on the backend is pinned to `http://localhost:4200` with `AllowCredentials()` required for SignalR.
 
 ---
 
@@ -269,6 +282,19 @@ ws://localhost:5219/hubs/inventory?access_token=<your-jwt>
    }
    ```
    Use the returned `token` as `Authorization: Bearer <token>` on all subsequent REST requests, or append `?access_token=<token>` for the SignalR connection.
+
+6. **Install frontend dependencies**
+   ```bash
+   cd car-inventory-client
+   npm install
+   ```
+
+7. **Run the Angular dev server**
+   ```bash
+   ng serve
+   # or: npm start
+   ```
+   App available at `http://localhost:4200`
 
 ---
 
