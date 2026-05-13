@@ -1,9 +1,7 @@
 {
+  "$schema": "https://schema.railpack.com",
   "provider": "dotnet",
-  "build": {
-    "cmd": "dotnet publish CarInventory.API/CarInventory.API.csproj -c Release -o out"
-  },
-  "start": {
-    "cmd": "dotnet out/CarInventory.API.dll"
+  "deploy": {
+    "startCommand": "dotnet out/CarInventory.API.dll"
   }
 }
