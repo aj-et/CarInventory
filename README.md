@@ -49,13 +49,49 @@ CarInventory.Infrastructure/← EF Core DbContext, Migrations
 
 ## Frontend (car-inventory-client/)
 
-| Item | Detail |
-|---|---|
-| Framework | Angular 19.2 (standalone component architecture) |
-| Real-time | `@microsoft/signalr` 10.x — connects to the SignalR hub |
-| Styling | SCSS |
-| Dev server | `ng serve` → `http://localhost:4200` |
-| Status | Scaffold stage — components and services in progress |
+**Framework:** Angular 19.2 — standalone components, lazy-loaded routes, Angular Signals for state (no NgRx)  
+**Dev server:** `ng serve` → `http://localhost:4200`
+
+### Folder Structure
+
+```
+car-inventory-client/src/app/
+├── core/
+│   ├── guards/         ← auth.guard.ts (CanActivateFn)
+│   ├── interceptors/   ← jwt.interceptor.ts (auto-attaches Bearer token)
+│   └── services/       ← auth, vehicle, order, signalr services
+└── features/
+    ├── auth/           ← login/, register/
+    ├── dashboard/      ← live stats + event feed
+    ├── vehicles/       ← vehicle-list/, vehicle-form/ (modal)
+    └── orders/         ← order-list/
+```
+
+### Feature Status
+
+| Page / Feature | Route | Status |
+|---|---|---|
+| Login | `/login` | Done |
+| Register | `/register` | Done |
+| Dashboard — live stats + event feed | `/dashboard` | Done |
+| Vehicle list with status filters | `/vehicles` | Done |
+| Add vehicle (modal form) | `/vehicles` | Done |
+| Edit / Delete vehicle | `/vehicles` | In progress |
+| Order list with status filters | `/orders` | Done |
+| Advance order / Mark as lost | `/orders` | Done |
+| Create / Edit / Delete orders | `/orders` | In progress |
+
+### Authentication (frontend)
+
+- JWT stored in `localStorage`; session persists across page refreshes
+- `jwt.interceptor.ts` automatically injects `Authorization: Bearer <token>` on every HTTP request
+- `auth.guard.ts` (CanActivateFn) protects `/dashboard`, `/vehicles`, and `/orders` — unauthenticated users are redirected to `/login`
+
+### SignalR (frontend)
+
+- Connection starts on login/register, stops on logout
+- Auto-reconnect enabled
+- Events handled: `StatsUpdated` (dashboard stat cards), `VehicleAdded`, `VehicleUpdated`, `OrderCreated` (live event banner in navbar)
 
 CORS on the backend is pinned to `http://localhost:4200` with `AllowCredentials()` required for SignalR.
 
@@ -269,7 +305,8 @@ ws://localhost:5219/hubs/inventory?access_token=<your-jwt>
    SignalR hub: `ws://localhost:5219/hubs/inventory`  
    Scalar docs: `https://localhost:7173/scalar/v1`
 
-5. **Register your first user**
+5. **Register your first user**  
+   Open `http://localhost:4200/register` in the browser (after step 7 below), or call the API directly:
    ```http
    POST /api/auth/register
    Content-Type: application/json
@@ -317,3 +354,39 @@ ws://localhost:5219/hubs/inventory?access_token=<your-jwt>
 **JSON circular reference** — `Customer.Orders` navigation property is decorated with `[JsonIgnore]`, and `ReferenceHandler.IgnoreCycles` is set globally in `Program.cs` to prevent serialization loops.
 
 **Server-side timestamps** — `CreatedAt` is always set in the controller, never accepted from the client.
+
+---
+
+## Known Security Limitations
+
+These are known issues in the current frontend implementation, accepted for now during development. Each entry notes the affected file and the intended fix.
+
+> **Note:** Documenting vulnerabilities like this is fine for a portfolio or local-dev project. In a production app with real users, do not list specific security gaps in a public README — fix them instead.
+
+**JWT stored in `localStorage`** — Severity: Medium  
+File: `core/services/auth.service.ts`  
+Any XSS on the page can read and exfiltrate the token via `localStorage.getItem('token')`. Fix: switch to `HttpOnly` cookies (requires backend support) or a memory-only token store.
+
+**No 401 interceptor — expired tokens stay "logged in"** — Severity: Medium  
+File: `core/interceptors/jwt.interceptor.ts`  
+When the 7-day JWT expires, API calls silently fail with 401 but `isLoggedIn` stays `true`. Users are stuck on protected pages with no feedback. Fix: add a `catchError` response handler in the interceptor that calls `authService.logout()` on 401.
+
+**Raw server error body shown to users** — Severity: Low-Medium  
+Files: `features/auth/login/login.component.ts`, `features/auth/register/register.component.ts`  
+`err.error` is passed directly to the displayed error message; backend stack traces or internal details could surface in the UI. Fix: use a fixed user-friendly string and log `err` to the console only.
+
+**`accessTokenFactory` captures a stale token snapshot** — Severity: Low  
+File: `core/services/signalr.service.ts`  
+The token is captured in a `const` before being passed to `accessTokenFactory`, so SignalR reconnects always use that original snapshot. Fix: `accessTokenFactory: () => this.authService.getToken() ?? ''`.
+
+**Private `hubConnection` accessed via bracket notation** — Severity: Low  
+Files: `features/vehicles/vehicle-list/vehicle-list.component.ts`, `features/orders/order-list/order-list.component.ts`  
+Bypasses TypeScript access control. If the hub hasn't connected yet when a component initializes, `hub` is `undefined` and SignalR listeners are silently never registered. Fix: expose a public method in `SignalrService` for registering event handlers.
+
+**No error feedback on order action buttons** — Severity: Low  
+File: `features/orders/order-list/order-list.component.ts`  
+`advanceStatus()` and `markLost()` have no `error` callback; failed requests silently leave the UI in stale state with no user feedback. Fix: add an `error` handler that displays an inline message.
+
+**Hardcoded `http://` base URLs — no environment config** — Severity: Low (dev) / High (production)  
+Files: `core/services/auth.service.ts`, `core/services/vehicle.service.ts`, `core/services/signalr.service.ts`, `features/orders/order-list/order-list.component.ts`  
+All API URLs point to `http://localhost:5219`. Fine locally, but if deployed without changing these to `https://`, the JWT and all data travel in plaintext. Fix: move the base URL to `src/environments/environment.ts` so prod builds automatically use the HTTPS endpoint.
