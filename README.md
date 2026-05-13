@@ -1,6 +1,6 @@
 # Car Inventory API
 
-A **Car Inventory Management System** built with ASP.NET Core following Clean Architecture principles. Manages vehicles, customers, and sales orders with automatic vehicle status tracking, JWT authentication, and role-based access control.
+A **Car Inventory Management System** built with ASP.NET Core following Clean Architecture principles. Manages vehicles, customers, and sales orders with automatic vehicle status tracking, JWT authentication, role-based access control, and real-time updates via SignalR.
 
 > **This is the backend half of a planned full-stack application.** An Angular frontend is in progress and will live alongside this folder in the same repository.
 
@@ -26,6 +26,7 @@ CarInventoryApp/
 | Database Driver | Npgsql 8.x (PostgreSQL) |
 | Database | PostgreSQL via Supabase |
 | Authentication | JWT Bearer + BCrypt.Net-Next |
+| Real-Time | ASP.NET Core SignalR |
 | API Docs | OpenAPI + Scalar UI |
 | Frontend (planned) | Angular |
 
@@ -36,7 +37,7 @@ CarInventoryApp/
 3-project Clean Architecture solution:
 
 ```
-CarInventory.API/           ← Controllers, Services, Program.cs, API configuration
+CarInventory.API/           ← Controllers, Hubs, Services, Program.cs
 CarInventory.Domain/        ← Models, DTOs (no dependencies on other layers)
 CarInventory.Infrastructure/← EF Core DbContext, Migrations
 ```
@@ -104,12 +105,12 @@ CarInventory.Infrastructure/← EF Core DbContext, Migrations
 
 Vehicle status is automatically managed when orders change:
 
-| Event | Vehicle Status |
+| Event | Vehicle Status Change |
 |---|---|
 | Order created | `Available` → `Reserved` |
-| Order status set to `Closed` | `Reserved` → `Sold` |
-| Order status set to `Lost` | `Reserved` → `Available` |
-| Order deleted | returns to `Available` |
+| Order status → `Closed` | `Reserved` → `Sold` |
+| Order status → `Lost` | `Reserved` → `Available` |
+| Order deleted | → `Available` |
 
 Orders can only be created against `Available` vehicles.
 
@@ -119,8 +120,9 @@ Orders can only be created against `Available` vehicles.
 |---|---|
 | `POST /api/auth/register` | Public |
 | `POST /api/auth/login` | Public |
-| All other routes | Valid JWT Bearer token |
+| All other REST routes | Valid JWT Bearer token |
 | `DELETE` on any resource | Admin role only |
+| SignalR hub connection | Valid JWT (via query string) |
 
 ---
 
@@ -147,9 +149,15 @@ Orders can only be created against `Available` vehicles.
 |---|---|---|---|
 | GET | `/api/vehicles` | Bearer | List all vehicles |
 | GET | `/api/vehicles/{id}` | Bearer | Get vehicle by ID |
-| POST | `/api/vehicles` | Bearer | Create vehicle (status defaults to `Available`) |
-| PUT | `/api/vehicles/{id}` | Bearer | Update vehicle |
-| DELETE | `/api/vehicles/{id}` | Admin | Delete vehicle |
+| GET | `/api/vehicles/stats` | Bearer | Live inventory counts by status |
+| POST | `/api/vehicles` | Bearer | Create vehicle → broadcasts `VehicleAdded` + `StatsUpdated` |
+| PUT | `/api/vehicles/{id}` | Bearer | Update vehicle → broadcasts `VehicleUpdated` + `StatsUpdated` |
+| DELETE | `/api/vehicles/{id}` | Admin | Delete vehicle → broadcasts `VehicleDeleted` + `StatsUpdated` |
+
+**Stats response:**
+```json
+{ "total": 42, "available": 18, "reserved": 5, "sold": 17, "inService": 2 }
+```
 
 ### Customers — `/api/customers`
 | Method | Route | Auth | Description |
@@ -165,11 +173,42 @@ Orders can only be created against `Available` vehicles.
 |---|---|---|---|
 | GET | `/api/orders` | Bearer | List all orders (includes Vehicle + Customer) |
 | GET | `/api/orders/{id}` | Bearer | Get order with relationships |
-| POST | `/api/orders` | Bearer | Create order (reserves vehicle) |
-| PUT | `/api/orders/{id}/status` | Bearer | Update order status (syncs vehicle status) |
-| DELETE | `/api/orders/{id}` | Admin | Delete order (releases vehicle) |
+| POST | `/api/orders` | Bearer | Create order → broadcasts `OrderCreated` + `VehicleUpdated` + `StatsUpdated` |
+| PUT | `/api/orders/{id}/status` | Bearer | Update status → broadcasts `OrderUpdated` + `VehicleUpdated` + `StatsUpdated` |
+| DELETE | `/api/orders/{id}` | Bearer | Delete order → broadcasts `OrderDeleted` + `VehicleUpdated` + `StatsUpdated` |
 
 Interactive API docs available at `/scalar/v1` when running in Development.
+
+---
+
+## Real-Time Events (SignalR)
+
+**Hub URL:** `ws://localhost:5219/hubs/inventory`
+
+Connect with your JWT token via query string — the standard `Authorization` header is not supported over WebSockets:
+```
+ws://localhost:5219/hubs/inventory?access_token=<your-jwt>
+```
+
+### Server → Client Events
+
+| Event | Payload | Triggered by |
+|---|---|---|
+| `Connected` | `string` confirmation message | On successful hub connection |
+| `VehicleAdded` | `Vehicle` object | POST /api/vehicles |
+| `VehicleUpdated` | `Vehicle` object | PUT /api/vehicles, order status changes |
+| `VehicleDeleted` | `int` vehicle ID | DELETE /api/vehicles |
+| `OrderCreated` | `Order` object | POST /api/orders |
+| `OrderUpdated` | `Order` object | PUT /api/orders/{id}/status |
+| `OrderDeleted` | `int` order ID | DELETE /api/orders |
+| `StatsUpdated` | Stats object (see below) | Any write operation on vehicles or orders |
+
+**`StatsUpdated` payload:**
+```json
+{ "total": 42, "available": 18, "reserved": 5, "sold": 17, "inService": 2 }
+```
+
+`StatsUpdated` fires after every mutating operation, making it easy to drive a live dashboard without polling.
 
 ---
 
@@ -214,6 +253,7 @@ Interactive API docs available at `/scalar/v1` when running in Development.
    dotnet run
    ```
    API: `http://localhost:5219` / `https://localhost:7173`  
+   SignalR hub: `ws://localhost:5219/hubs/inventory`  
    Scalar docs: `https://localhost:7173/scalar/v1`
 
 5. **Register your first user**
@@ -228,11 +268,17 @@ Interactive API docs available at `/scalar/v1` when running in Development.
      "password": "yourpassword"
    }
    ```
-   Use the returned `token` as `Authorization: Bearer <token>` on all subsequent requests.
+   Use the returned `token` as `Authorization: Bearer <token>` on all subsequent REST requests, or append `?access_token=<token>` for the SignalR connection.
 
 ---
 
 ## Notable Implementation Details
+
+**SignalR JWT via query string** — WebSockets cannot send custom headers, so the `JwtBearerEvents.OnMessageReceived` hook reads the token from `?access_token=` when the path starts with `/hubs`. Standard header auth still works for REST routes.
+
+**CORS requires `AllowCredentials()`** — SignalR's WebSocket handshake requires credentials to be allowed on the CORS policy. `AllowAnyOrigin()` is incompatible with this; the Angular origin is pinned explicitly.
+
+**`StatsUpdated` after every write** — Both `VehiclesController` and `OrdersController` share a private `BroadcastStats()` helper that fires a live inventory count snapshot to all connected clients after any mutation.
 
 **BCrypt password hashing** — Passwords are hashed with BCrypt.Net-Next before storage. Plaintext passwords are never persisted.
 
@@ -240,12 +286,8 @@ Interactive API docs available at `/scalar/v1` when running in Development.
 
 **Middleware order matters** — `UseAuthentication()` is registered before `UseAuthorization()` in the pipeline. Reversing these breaks auth silently.
 
-**TokenService is Scoped** — Registered as `AddScoped<TokenService>()` so it resolves configuration correctly within the request lifecycle.
-
 **Npgsql downgrade to 8.x** — Npgsql 10.x had a breaking bug with this setup; pinned to `8.0.10` across EF Core and the Npgsql provider for stability.
 
 **JSON circular reference** — `Customer.Orders` navigation property is decorated with `[JsonIgnore]`, and `ReferenceHandler.IgnoreCycles` is set globally in `Program.cs` to prevent serialization loops.
-
-**CORS** — Configured to allow requests from `http://localhost:4200` for the Angular frontend.
 
 **Server-side timestamps** — `CreatedAt` is always set in the controller, never accepted from the client.
