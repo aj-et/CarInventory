@@ -4,6 +4,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { OrderService } from '../../../core/services/order.service';
 import { Vehicle } from '../../../core/services/vehicle.service';
+import { environment } from '../../../../environments/environment';
 
 interface Customer {
   id: number;
@@ -179,13 +180,13 @@ export class OrderFormComponent implements OnInit {
   }
 
   loadVehicles() {
-    this.http.get<Vehicle[]>('http://localhost:5219/api/vehicles').subscribe(vehicles => {
+    this.http.get<Vehicle[]>(`${environment.apiUrl}/api/vehicles`).subscribe(vehicles => {
       this.availableVehicles = vehicles.filter(v => v.status === 0);
     });
   }
 
   loadCustomers() {
-    this.http.get<Customer[]>('http://localhost:5219/api/customers').subscribe(customers => {
+    this.http.get<Customer[]>(`${environment.apiUrl}/api/customers`).subscribe(customers => {
       this.customers = customers;
     });
   }
@@ -197,7 +198,7 @@ export class OrderFormComponent implements OnInit {
       return;
     }
     this.creatingCustomer = true;
-    this.http.post<Customer>('http://localhost:5219/api/customers', newCustomer).subscribe({
+    this.http.post<Customer>(`${environment.apiUrl}/api/customers`, newCustomer).subscribe({
       next: (customer) => {
         this.customers = [...this.customers, customer];
         this.form.patchValue({ customerId: customer.id });

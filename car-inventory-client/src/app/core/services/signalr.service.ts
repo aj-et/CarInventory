@@ -1,6 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import * as signalR from '@microsoft/signalr';
 import { AuthService } from './auth.service';
+import { environment } from '../../../environments/environment';
 
 export interface VehicleStats {
   total: number;
@@ -23,7 +24,7 @@ export class SignalrService {
     const token = this.authService.getToken();
 
     this.hubConnection = new signalR.HubConnectionBuilder()
-      .withUrl('http://localhost:5219/hubs/inventory', {
+      .withUrl(environment.hubUrl, {
         accessTokenFactory: () => token ?? ''
       })
       .withAutomaticReconnect()
@@ -52,5 +53,9 @@ export class SignalrService {
 
   stopConnection() {
     this.hubConnection?.stop();
+  }
+
+  getHubConnection() {
+    return this.hubConnection;
   }
 }

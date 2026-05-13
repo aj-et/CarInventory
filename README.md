@@ -64,7 +64,7 @@ car-inventory-client/src/app/
     ├── auth/           ← login/, register/
     ├── dashboard/      ← live stats + event feed
     ├── vehicles/       ← vehicle-list/, vehicle-form/ (modal)
-    └── orders/         ← order-list/
+    └── orders/         ← order-list/, order-form/ (modal)
 ```
 
 ### Feature Status
@@ -337,6 +337,49 @@ ws://localhost:5219/hubs/inventory?access_token=<your-jwt>
 
 ---
 
+## Deployment
+
+### Backend (Railway)
+
+The API is deployable as a Docker container. A multi-stage `Dockerfile` is included in `CarInventoryAPI/`:
+
+- **Build stage**: `mcr.microsoft.com/dotnet/sdk:10.0` — copies all three projects, restores, and publishes to `/app/out`
+- **Runtime stage**: `mcr.microsoft.com/dotnet/aspnet:10.0` — copies published artifacts, runs on port 8080
+
+`railpack.json` configures Railway's build/start commands for the dotnet provider.
+
+Set the following environment variables in Railway (or equivalent host):
+
+| Variable | Value |
+|---|---|
+| `ConnectionStrings__DefaultConnection` | PostgreSQL connection string |
+| `Jwt__Key` | Signing key — minimum 32 characters |
+| `Jwt__Issuer` | `CarInventoryAPI` |
+| `Jwt__Audience` | `CarInventoryClient` |
+
+### Frontend (Angular)
+
+Update `car-inventory-client/src/environments/environment.prod.ts` with your deployed backend URL before building:
+
+```ts
+export const environment = {
+  production: true,
+  apiUrl: 'https://your-backend.up.railway.app',
+  hubUrl: 'https://your-backend.up.railway.app/hubs/inventory'
+};
+```
+
+Build for production:
+
+```bash
+cd car-inventory-client
+ng build --configuration production
+```
+
+The output in `dist/car-inventory-client/browser/` can be served as a static site (Netlify, Vercel, Railway static, etc.).
+
+---
+
 ## Notable Implementation Details
 
 **SignalR JWT via query string** — WebSockets cannot send custom headers, so the `JwtBearerEvents.OnMessageReceived` hook reads the token from `?access_token=` when the path starts with `/hubs`. Standard header auth still works for REST routes.
@@ -352,6 +395,8 @@ ws://localhost:5219/hubs/inventory?access_token=<your-jwt>
 **Middleware order matters** — `UseAuthentication()` is registered before `UseAuthorization()` in the pipeline. Reversing these breaks auth silently.
 
 **Npgsql downgrade to 8.x** — Npgsql 10.x had a breaking bug with this setup; pinned to `8.0.10` across EF Core and the Npgsql provider for stability.
+
+**Angular environment files for API URL** — `src/environments/environment.ts` (dev) and `environment.prod.ts` (prod) define `apiUrl` and `hubUrl`. All services import from this file. `angular.json` is configured with `fileReplacements` so `ng build --configuration production` automatically substitutes the prod file, pointing the app at the Railway backend without any code changes.
 
 **JSON circular reference** — `Customer.Orders` navigation property is decorated with `[JsonIgnore]`, and `ReferenceHandler.IgnoreCycles` is set globally in `Program.cs` to prevent serialization loops.
 
@@ -389,10 +434,6 @@ Bypasses TypeScript access control. If the hub hasn't connected yet when a compo
 File: `features/orders/order-list/order-list.component.ts`  
 `advanceStatus()` and `markLost()` have no `error` callback; failed requests silently leave the UI in stale state with no user feedback. Fix: add an `error` handler that displays an inline message.
 
-**Hardcoded `http://` base URLs — no environment config** — Severity: Low (dev) / High (production)  
-Files: `core/services/auth.service.ts`, `core/services/vehicle.service.ts`, `core/services/signalr.service.ts`, `features/orders/order-list/order-list.component.ts`  
-All API URLs point to `http://localhost:5219`. Fine locally, but if deployed without changing these to `https://`, the JWT and all data travel in plaintext. Fix: move the base URL to `src/environments/environment.ts` so prod builds automatically use the HTTPS endpoint.
-
 **`alert()` used for delete error messages** — Severity: Low  
 File: `features/vehicles/vehicle-list/vehicle-list.component.ts`  
 Browser-native `alert()` is used to surface delete errors. It blocks the UI thread and its appearance varies by OS/browser. Fix: replace with an inline error signal, consistent with how other components handle errors.
@@ -401,9 +442,9 @@ Browser-native `alert()` is used to surface delete errors. It blocks the UI thre
 File: `features/vehicles/vehicle-form/vehicle-form.component.ts`  
 VIN accepts any string (should be exactly 17 alphanumeric characters, excluding I, O, Q). Mileage, MSRP, and Selling Price have no minimum validator and will accept negative numbers. Fix: add `Validators.pattern(/^[A-HJ-NPR-Z0-9]{17}$/)` for VIN and `Validators.min(0)` for numeric fields. The backend should also validate, but the form should catch it first.
 
-**Raw `HttpClient` calls in order form — no service or environment config** — Severity: Low  
+**Raw `HttpClient` calls in order form — bypasses service layer** — Severity: Low  
 File: `features/orders/order-form/order-form.component.ts`  
-Vehicle list, customer list, and customer creation are done via raw `http.get/post` with hardcoded `http://localhost:5219` URLs directly in the component, bypassing the service layer. The URL is duplicated across the codebase with no single place to update it for production. Fix: create a `CustomerService` and use Angular environment files for the base URL.
+Vehicle list and customer list/creation are fetched directly via `HttpClient` using `environment.apiUrl`, bypassing the service layer. A dedicated `CustomerService` and injecting `VehicleService` into the form would centralize this logic. Fix: create a `CustomerService` and route all HTTP calls through the service layer.
 
 **No confirmation before advancing order status or marking as lost** — Severity: Low  
 File: `features/orders/order-list/order-list.component.ts`  

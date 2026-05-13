@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { environment } from '../../../environments/environment';
 
 export interface Vehicle {
   id: number;
@@ -27,7 +28,7 @@ export interface VehicleStats {
 
 @Injectable({ providedIn: 'root' })
 export class VehicleService {
-  private apiUrl = 'http://localhost:5219/api/vehicles';
+  private apiUrl = `${environment.apiUrl}/api/vehicles`;
 
   constructor(private http: HttpClient) {}
 
