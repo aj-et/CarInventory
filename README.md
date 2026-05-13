@@ -76,10 +76,12 @@ car-inventory-client/src/app/
 | Dashboard — live stats + event feed | `/dashboard` | Done |
 | Vehicle list with status filters | `/vehicles` | Done |
 | Add vehicle (modal form) | `/vehicles` | Done |
-| Edit / Delete vehicle | `/vehicles` | In progress |
+| Edit vehicle | `/vehicles` | Done |
+| Delete vehicle (Admin only) | `/vehicles` | Done |
 | Order list with status filters | `/orders` | Done |
+| Create order | `/orders` | Done |
 | Advance order / Mark as lost | `/orders` | Done |
-| Create / Edit / Delete orders | `/orders` | In progress |
+| Delete order (Admin only) | `/orders` | Done |
 
 ### Authentication (frontend)
 
@@ -390,3 +392,19 @@ File: `features/orders/order-list/order-list.component.ts`
 **Hardcoded `http://` base URLs — no environment config** — Severity: Low (dev) / High (production)  
 Files: `core/services/auth.service.ts`, `core/services/vehicle.service.ts`, `core/services/signalr.service.ts`, `features/orders/order-list/order-list.component.ts`  
 All API URLs point to `http://localhost:5219`. Fine locally, but if deployed without changing these to `https://`, the JWT and all data travel in plaintext. Fix: move the base URL to `src/environments/environment.ts` so prod builds automatically use the HTTPS endpoint.
+
+**`alert()` used for delete error messages** — Severity: Low  
+File: `features/vehicles/vehicle-list/vehicle-list.component.ts`  
+Browser-native `alert()` is used to surface delete errors. It blocks the UI thread and its appearance varies by OS/browser. Fix: replace with an inline error signal, consistent with how other components handle errors.
+
+**No VIN format or numeric range validation on vehicle form** — Severity: Low  
+File: `features/vehicles/vehicle-form/vehicle-form.component.ts`  
+VIN accepts any string (should be exactly 17 alphanumeric characters, excluding I, O, Q). Mileage, MSRP, and Selling Price have no minimum validator and will accept negative numbers. Fix: add `Validators.pattern(/^[A-HJ-NPR-Z0-9]{17}$/)` for VIN and `Validators.min(0)` for numeric fields. The backend should also validate, but the form should catch it first.
+
+**Raw `HttpClient` calls in order form — no service or environment config** — Severity: Low  
+File: `features/orders/order-form/order-form.component.ts`  
+Vehicle list, customer list, and customer creation are done via raw `http.get/post` with hardcoded `http://localhost:5219` URLs directly in the component, bypassing the service layer. The URL is duplicated across the codebase with no single place to update it for production. Fix: create a `CustomerService` and use Angular environment files for the base URL.
+
+**No confirmation before advancing order status or marking as lost** — Severity: Low  
+File: `features/orders/order-list/order-list.component.ts`  
+"Advance →" and "Lost" buttons fire immediately on click with no confirmation. Marking an order as Lost effectively closes it — a misclick cannot be easily undone. Delete already uses a confirm dialog; status mutations should too, at minimum for "Mark as Lost." Fix: reuse the existing `ConfirmDialogComponent` before executing these mutations.

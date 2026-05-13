@@ -3,12 +3,14 @@ import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { VehicleService, Vehicle } from '../../../core/services/vehicle.service';
 import { SignalrService } from '../../../core/services/signalr.service';
+import { AuthService } from '../../../core/services/auth.service';
 import { VehicleFormComponent } from '../vehicle-form/vehicle-form.component';
+import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 
 @Component({
   selector: 'app-vehicle-list',
   standalone: true,
-  imports: [CommonModule, RouterLink, VehicleFormComponent],
+  imports: [CommonModule, RouterLink, VehicleFormComponent, ConfirmDialogComponent],
   template: `
     <div class="page">
       <div class="page-header">
@@ -16,17 +18,25 @@ import { VehicleFormComponent } from '../vehicle-form/vehicle-form.component';
           <h1>Vehicles</h1>
           <p>{{ vehicles().length }} vehicles in inventory</p>
         </div>
-        <button class="btn-primary" (click)="showForm.set(true)">+ Add Vehicle</button>
+        <button class="btn-primary" (click)="openAddForm()">+ Add Vehicle</button>
       </div>
 
-      <!-- Add Vehicle Form Modal -->
       @if (showForm()) {
         <app-vehicle-form
-          (saved)="onVehicleSaved($event)"
-          (cancelled)="showForm.set(false)" />
+          [editVehicle]="selectedVehicle()"
+          (saved)="onVehicleSaved()"
+          (cancelled)="closeForm()" />
       }
 
-      <!-- Status Filter -->
+      @if (vehicleToDelete()) {
+        <app-confirm-dialog
+          title="Delete Vehicle?"
+          [message]="'Are you sure you want to delete ' + vehicleToDelete()!.year + ' ' + vehicleToDelete()!.make + ' ' + vehicleToDelete()!.model + '? This cannot be undone.'"
+          confirmLabel="Yes, Delete"
+          (confirmed)="confirmDeleteVehicle()"
+          (cancelled)="vehicleToDelete.set(null)" />
+      }
+
       <div class="filters">
         @for (filter of filters; track filter.value) {
           <button
@@ -38,7 +48,6 @@ import { VehicleFormComponent } from '../vehicle-form/vehicle-form.component';
         }
       </div>
 
-      <!-- Vehicle Table -->
       <div class="table-container">
         @if (loading()) {
           <div class="loading">Loading vehicles...</div>
@@ -55,6 +64,7 @@ import { VehicleFormComponent } from '../vehicle-form/vehicle-form.component';
                 <th>Mileage</th>
                 <th>Selling Price</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -73,6 +83,18 @@ import { VehicleFormComponent } from '../vehicle-form/vehicle-form.component';
                     <span class="badge" [class]="getStatusClass(vehicle.status)">
                       {{ getStatusLabel(vehicle.status) }}
                     </span>
+                  </td>
+                  <td>
+                    <div class="action-buttons">
+                      <button class="btn-edit" (click)="openEditForm(vehicle)">Edit</button>
+                      <button
+                        class="btn-delete"
+                        [class.disabled]="authService.currentUser()?.role !== 'Admin'"
+                        (click)="authService.currentUser()?.role === 'Admin' ? vehicleToDelete.set(vehicle) : null"
+                        [attr.data-tooltip]="authService.currentUser()?.role !== 'Admin' ? 'Contact an admin to delete' : null">
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               }
@@ -106,13 +128,25 @@ import { VehicleFormComponent } from '../vehicle-form/vehicle-form.component';
     .badge.reserved { background: #451a03; color: #f59e0b; }
     .badge.sold { background: #2e1065; color: #a855f7; }
     .badge.inservice { background: #0c1a2e; color: #38bdf8; }
+    .action-buttons { display: flex; gap: 0.5rem; }
+    .btn-edit { background: transparent; color: #38bdf8; border: 1px solid #38bdf8; padding: 0.35rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s; }
+    .btn-edit:hover { background: #38bdf8; color: #0f172a; }
+    .btn-delete { background: transparent; color: #ef4444; border: 1px solid #ef4444; padding: 0.35rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s; }
+    .btn-delete:hover { background: #ef4444; color: white; }
     .loading, .empty { padding: 3rem; text-align: center; color: #64748b; }
+    .btn-delete.disabled { opacity: 0.4; cursor: not-allowed; border-color: #475569; color: #475569; position: relative; }
+    .btn-delete.disabled:hover { background: transparent; color: #475569; }
+    .btn-delete[data-tooltip] { position: relative; }
+    .btn-delete[data-tooltip]:hover::after { content: attr(data-tooltip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #0f172a; color: #e2e8f0; padding: 0.4rem 0.75rem; border-radius: 6px; font-size: 0.75rem; white-space: nowrap; border: 1px solid #334155; pointer-events: none; z-index: 10; }
+    .btn-delete[data-tooltip]:hover::before { content: ''; position: absolute; bottom: calc(100% + 1px); left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: #334155; pointer-events: none; z-index: 10; }
   `]
 })
 export class VehicleListComponent implements OnInit {
   vehicles = signal<Vehicle[]>([]);
   loading = signal(true);
   showForm = signal(false);
+  selectedVehicle = signal<Vehicle | null>(null);
+  vehicleToDelete = signal<Vehicle | null>(null);
   activeFilter = signal<number | 'all'>('all');
 
   filters = [
@@ -123,9 +157,16 @@ export class VehicleListComponent implements OnInit {
     { label: '🔧 In Service', value: 3 }
   ];
 
+  filteredVehicles = computed(() => {
+    const filter = this.activeFilter();
+    if (filter === 'all') return this.vehicles();
+    return this.vehicles().filter(v => v.status === filter);
+  });
+
   constructor(
     private vehicleService: VehicleService,
-    private signalrService: SignalrService
+    private signalrService: SignalrService,
+    public authService: AuthService
   ) {}
 
   ngOnInit() {
@@ -145,7 +186,6 @@ export class VehicleListComponent implements OnInit {
   }
 
   listenToSignalR() {
-    // Refresh list when vehicles change in real time
     const hub = this.signalrService['hubConnection'];
     if (hub) {
       hub.on('VehicleAdded', () => this.loadVehicles());
@@ -154,15 +194,38 @@ export class VehicleListComponent implements OnInit {
     }
   }
 
-  filteredVehicles = computed(() => {
-    const filter = this.activeFilter();
-    if (filter === 'all') return this.vehicles();
-    return this.vehicles().filter(v => v.status === filter);
-  });
+  openAddForm() {
+    this.selectedVehicle.set(null);
+    this.showForm.set(true);
+  }
 
-  onVehicleSaved(vehicle: Vehicle) {
-    // this.vehicles.update(list => [...list, vehicle]);
+  openEditForm(vehicle: Vehicle) {
+    this.selectedVehicle.set(vehicle);
+    this.showForm.set(true);
+  }
+
+  closeForm() {
+    this.selectedVehicle.set(null);
     this.showForm.set(false);
+  }
+
+  onVehicleSaved() {
+    this.closeForm();
+  }
+
+  confirmDeleteVehicle() {
+    const vehicle = this.vehicleToDelete();
+    if (!vehicle) return;
+    this.vehicleService.delete(vehicle.id).subscribe({
+      next: () => {
+        this.vehicleToDelete.set(null);
+        this.loadVehicles();
+      },
+      error: (err) => {
+        alert(err.error || 'Failed to delete vehicle.');
+        this.vehicleToDelete.set(null);
+      }
+    });
   }
 
   getStatusLabel(status: number): string {
